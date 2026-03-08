@@ -1,0 +1,14 @@
+name: lint-on-edit
+description: Run linter after file edits
+trigger:
+  event: PostToolUse
+  matcher: "Edit|Write"
+steps:
+  - name: run-lint
+    run: "npm run lint 2>&1 || true"
+    timeout: 60
+    on_failure: continue
+
+  - name: report
+    when: "steps.run-lint.exit_code != 0"
+    run: "echo 'Lint issues detected — review output above.'"

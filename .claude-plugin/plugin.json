@@ -1,0 +1,7 @@
+{
+  "name": "claude-workflows",
+  "version": "1.0.0",
+  "description": "Declarative workflow engine — define YAML workflows triggered by hooks or cron, with sequential/parallel steps, conditions, and agent actions.",
+  "author": { "name": "NodeNestor" },
+  "homepage": "https://github.com/NodeNestor/claude-workflows"
+}

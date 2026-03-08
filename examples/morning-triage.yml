@@ -1,0 +1,17 @@
+name: morning-triage
+description: Example cron workflow — daily triage at 8am weekdays
+trigger:
+  cron: "0 8 * * 1-5"
+steps:
+  - name: check-issues
+    run: "gh issue list --state open --limit 10"
+    timeout: 30
+    on_failure: continue
+
+  - name: check-prs
+    run: "gh pr list --state open --limit 10"
+    timeout: 30
+    on_failure: continue
+
+  - name: triage
+    agent: "Review the open issues and PRs listed above. Summarize what needs attention today and suggest priorities."

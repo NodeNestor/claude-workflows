@@ -1,0 +1,19 @@
+name: auto-test
+description: Run tests after git push
+trigger:
+  event: PostToolUse
+  matcher: Bash
+  condition: "git push"
+steps:
+  - name: run-tests
+    run: "npm test"
+    timeout: 120
+    on_failure: stop
+
+  - name: notify-success
+    when: "steps.run-tests.exit_code == 0"
+    run: "echo 'All tests passed after push!'"
+
+  - name: fix-tests
+    when: "steps.run-tests.exit_code != 0"
+    agent: "The tests failed after git push. Please examine the test output and fix the failing tests."
