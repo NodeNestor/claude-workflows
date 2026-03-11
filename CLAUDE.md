@@ -1,28 +1,67 @@
-# claude-workflows
+# claude-workflows — Agent Controller
 
-## Cron-triggered workflows
+This plugin is your scheduling and automation layer. Use it to run workflows triggered by events, cron schedules, or manual invocation.
 
-When a workflow has `trigger: cron: "<expression>"`, use Claude Code's built-in `CronCreate` tool to schedule it.
+## How to orchestrate workflows
 
-On session start, if workflows with cron triggers are detected, schedule each one:
+### On session start
 
-```
-CronCreate(
-  cron: "<the cron expression from the workflow>",
-  prompt: "Run the workflow '<workflow_name>' using the run_workflow MCP tool."
-)
-```
+1. Check if any workflows have `cron` triggers
+2. For each one, schedule it with `CronCreate`:
+   ```
+   CronCreate(cron: "<expression>", prompt: "Run the workflow '<name>' using the run_workflow MCP tool. Act on any agent steps by spawning Agents.")
+   ```
+3. Report what was scheduled to the user
 
-This makes cron workflows work automatically during the session. The cron job fires at the scheduled time, which triggers the workflow via the MCP tool.
+### When a workflow runs
 
-## Hook-triggered workflows
+The `run_workflow` MCP tool executes shell steps and returns results. For `agent` steps, it returns prompts. You MUST act on these:
 
-Hook triggers (PostToolUse, SessionStart, Stop) are handled automatically by the plugin's hooks — no extra setup needed. They fire when the matching Claude Code event occurs.
+- **Spawn an Agent** for each agent prompt — don't just print it
+- Use `mode: "bypassPermissions"` for automated workflows
+- If the agent prompt references step output (test failures, lint errors, PR data), include that context in the agent's prompt
+- Launch independent agents in parallel when possible
 
-## Creating workflows
+### When to use workflows vs direct action
 
-When the user asks to automate something recurring, create a workflow YAML in `.claude/workflows/`:
+- **Use a workflow** when: the task is recurring, has multiple steps, needs conditions, or should run on a schedule
+- **Use direct action** when: it's a one-off task the user asked for right now
 
-- For **event-based** automation (after edits, after push): use hook triggers
-- For **time-based** automation (every hour, daily): use cron triggers with `CronCreate`
-- For **one-shot** scheduled tasks: use `CronCreate` directly without a workflow file
+## Trigger types
+
+### Hook triggers (automatic)
+Handled by the plugin's hooks — fires when Claude uses matching tools:
+- `PostToolUse` + `matcher: Bash` + `condition: "git push"` → fires after git push
+- `PostToolUse` + `matcher: "Edit|Write"` → fires after file edits
+- `Stop` → fires when session ends
+
+### Cron triggers (scheduled via CronCreate)
+For polling and recurring tasks. Schedule on session start.
+
+### Manual triggers
+User says "run workflow X" or you call `run_workflow` directly.
+
+## Creating workflows for users
+
+When users ask to automate something, create a workflow YAML. Pick the right trigger:
+
+| User says | Trigger type | Example |
+|-----------|-------------|---------|
+| "run tests after every push" | hook: PostToolUse/Bash/git push | auto-test.yml |
+| "lint after edits" | hook: PostToolUse/Edit\|Write | lint-on-edit.yml |
+| "check PRs every 10 minutes" | cron: */10 * * * * | pr-watch.yml |
+| "morning standup summary" | cron: 57 8 * * 1-5 | morning-triage.yml |
+| "watch CI and fix failures" | cron: */5 * * * * | ci-watch.yml |
+| "review new issues" | cron: */15 * * * * | issue-watch.yml |
+
+## Polling remote state
+
+For GitHub events (PRs, issues, CI), use cron workflows that poll with `gh` CLI:
+- `gh pr list --state open --json number,title,updatedAt,author`
+- `gh issue list --state open --json number,title,labels`
+- `gh run list --limit 5 --json status,conclusion,headBranch`
+- `gh pr checks <number>`
+
+The workflow runs the `gh` command, then an agent step tells Claude what to do with the results.
+
+To avoid acting on the same event twice, agent steps should compare against previous runs. The workflow history (logged in `.claude/workflows/runs/`) provides this context.

@@ -1,0 +1,12 @@
+name: issue-watch
+description: Poll for new issues, triage and label them
+trigger:
+  cron: "*/15 * * * *"
+steps:
+  - name: fetch-issues
+    run: "gh issue list --state open --json number,title,body,labels,createdAt --limit 10"
+    timeout: 30
+    on_failure: continue
+
+  - name: triage
+    agent: "Review the open issues above. For any new unlabeled issues, analyze the content and add appropriate labels using 'gh issue edit <number> --add-label <label>'. Summarize what's new."

@@ -1,25 +1,27 @@
 # claude-workflows
 
-Declarative workflow engine for Claude Code. Define YAML workflows triggered by hooks or cron, with sequential steps, conditions, and agent actions. Like GitHub Actions but for Claude Code.
+Agent controller for Claude Code. Define YAML workflows that react to events, poll remote state, and spawn agents to handle work automatically.
 
-## Installation
-
-Install as a Claude Code plugin — no pip dependencies required (pure Python stdlib).
+## Install
 
 ```bash
-# From your project directory:
-bash install.sh
-# or on Windows:
-powershell -File install.ps1
+/plugin install claude-workflows
 ```
 
-## Quick Start
+## What it does
 
-Create `.claude/workflows/my-workflow.yml`:
+- **React to local events** — run tests after push, lint after edits, clean up on session end
+- **Poll remote state** — watch for new PRs, CI failures, issues, deployments
+- **Schedule recurring tasks** — morning triage, hourly checks, periodic cleanup
+- **Spawn agents** — workflows can tell Claude to spawn agents for complex tasks
+
+## Quick start
+
+Create `.claude/workflows/auto-test.yml`:
 
 ```yaml
 name: auto-test
-description: Run tests after git push
+description: Run tests after git push, fix failures automatically
 trigger:
   event: PostToolUse
   matcher: Bash
@@ -32,108 +34,152 @@ steps:
 
   - name: fix-tests
     when: "steps.run-tests.exit_code != 0"
-    agent: "Fix the failing tests"
+    agent: "Tests failed after push. Examine the output and fix the failing tests."
 ```
 
-## Workflow Format
+## Triggers
 
-### Top-level fields
+### Hook triggers — react to Claude's actions
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | yes | Workflow identifier |
-| `description` | no | Human-readable description |
-| `trigger` | yes | When to run (see Triggers) |
-| `steps` | yes | List of steps to execute |
+```yaml
+# After git push
+trigger:
+  event: PostToolUse
+  matcher: Bash
+  condition: "git push"
 
-### Triggers
+# After file edits
+trigger:
+  event: PostToolUse
+  matcher: "Edit|Write"
 
-**Hook trigger** — runs when a Claude Code hook fires:
+# On session end
+trigger:
+  event: Stop
+```
+
+### Cron triggers — scheduled via Claude Code's built-in CronCreate
 
 ```yaml
 trigger:
-  event: PostToolUse      # Hook event: SessionStart, PostToolUse, Stop
-  matcher: "Bash"         # Optional: regex on tool name (e.g. "Edit|Write")
-  condition: "git push"   # Optional: regex on tool_input content
+  cron: "*/10 * * * *"    # every 10 minutes
+  cron: "57 8 * * 1-5"    # weekdays at ~9am
+  cron: "0 * * * *"       # hourly
 ```
 
-**Cron trigger** — uses Claude Code's built-in `CronCreate` to schedule recurring runs:
+On session start, cron workflows are automatically scheduled. They run while the session is active.
+
+## Steps
 
 ```yaml
-trigger:
-  cron: "0 8 * * 1-5"    # Standard cron expression (weekdays at 8am)
+steps:
+  # Shell command
+  - name: run-tests
+    run: "npm test"
+    timeout: 120
+    on_failure: stop       # stop | continue | retry
+    max_retries: 2
+
+  # Conditional step
+  - name: fix
+    when: "steps.run-tests.exit_code != 0"
+    agent: "Fix the failing tests based on the output above."
+
+  # Agent step — Claude spawns an agent to handle this
+  - name: review
+    agent: "Review the PR and leave feedback."
 ```
-
-On session start, the plugin detects cron workflows and prompts Claude to schedule them with `CronCreate`. They run automatically at the specified times while the session is active.
-
-### Steps
-
-Each step runs sequentially. Fields:
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `name` | required | Step identifier (used in conditions) |
-| `run` | - | Shell command to execute |
-| `agent` | - | Prompt for Claude to act on (alternative to `run`) |
-| `when` | always | Condition expression (skip if false) |
-| `timeout` | 120 | Seconds before timeout |
-| `on_failure` | stop | `stop`, `continue`, or `retry` |
-| `max_retries` | 0 | Retry count (only with `on_failure: retry`) |
 
 ### Conditions
 
-Use `when` to conditionally run steps based on previous results:
-
 ```yaml
-# Check exit code
+when: "steps.build.exit_code == 0"
 when: "steps.run-tests.exit_code != 0"
-
-# Check output contains string
-when: "contains(steps.run-lint.output, 'error')"
-
-# Boolean logic
+when: "contains(steps.check-ci.output, 'failure')"
 when: "steps.build.exit_code == 0 and steps.test.exit_code == 0"
-
-# Comparisons: ==, !=, >, <, >=, <=
-when: "steps.count.exit_code >= 1"
 ```
 
-Available step fields: `exit_code`, `output`, `status`
+## Example workflows
 
-### Agent Steps
-
-Agent steps inject a prompt back to Claude instead of running a shell command:
-
+### Watch PRs and review them
 ```yaml
-- name: fix-issues
-  agent: "Review the test failures above and fix the code"
+name: pr-watch
+trigger:
+  cron: "*/10 * * * *"
+steps:
+  - name: fetch-prs
+    run: "gh pr list --state open --json number,title,author,updatedAt --limit 10"
+  - name: review
+    agent: "Review new/updated PRs. Spawn an agent to review code and comment."
 ```
 
-Since hooks can't spawn sub-agents, the prompt is returned as a message that tells Claude what to do next.
+### Monitor CI and auto-fix failures
+```yaml
+name: ci-watch
+trigger:
+  cron: "*/5 * * * *"
+steps:
+  - name: check-ci
+    run: "gh run list --limit 5 --json status,conclusion,headBranch"
+  - name: fix
+    when: "contains(steps.check-ci.output, 'failure')"
+    agent: "CI failed. Check the logs with 'gh run view <id> --log-failed' and fix it."
+```
 
-## MCP Tools
+### Triage new issues
+```yaml
+name: issue-watch
+trigger:
+  cron: "*/15 * * * *"
+steps:
+  - name: fetch-issues
+    run: "gh issue list --state open --json number,title,body,labels --limit 10"
+  - name: triage
+    agent: "Triage new unlabeled issues. Add labels with 'gh issue edit'."
+```
 
-The plugin exposes these tools via MCP:
+### Morning standup
+```yaml
+name: morning-triage
+trigger:
+  cron: "57 8 * * 1-5"
+steps:
+  - name: check-issues
+    run: "gh issue list --state open --limit 10"
+  - name: check-prs
+    run: "gh pr list --state open --limit 10"
+  - name: triage
+    agent: "Summarize what needs attention today and suggest priorities."
+```
 
-- **list_workflows(project_path)** — List all workflows
-- **run_workflow(project_path, workflow_name)** — Manually trigger a workflow
-- **workflow_history(project_path, limit)** — Show recent executions
-- **create_workflow(project_path, name, trigger, steps)** — Create a new workflow
-- **pause_workflow(project_path, workflow_name)** — Pause a workflow
-- **resume_workflow(project_path, workflow_name)** — Resume a paused workflow
+## MCP tools
 
-## Execution Logs
+| Tool | Description |
+|------|-------------|
+| `list_workflows` | List all workflows with triggers |
+| `run_workflow` | Manually trigger a workflow |
+| `create_workflow` | Create a new workflow YAML |
+| `workflow_history` | Show recent execution logs |
+| `pause_workflow` | Pause a workflow |
+| `resume_workflow` | Resume a paused workflow |
 
-All workflow runs are logged to `.claude/workflows/runs/` as JSON files with timestamps, step results, and outputs.
+## How it works
 
-## Pausing Workflows
+```
+.claude/workflows/
+├── auto-test.yml          # hook-triggered
+├── pr-watch.yml           # cron-triggered
+├── ci-watch.yml           # cron-triggered
+└── runs/                  # execution logs (JSON)
+```
 
-Pause a workflow by renaming its file with `.paused` suffix (e.g., `auto-test.paused.yml`). The `pause_workflow` and `resume_workflow` MCP tools handle this automatically.
+- **Hook workflows** fire automatically via plugin hooks
+- **Cron workflows** are scheduled via `CronCreate` on session start
+- **Agent steps** tell Claude to spawn agents for complex work
+- **Execution logs** track every run with timestamps, outputs, and status
 
-## Examples
+## Requirements
 
-See the `examples/` directory for sample workflows:
-
-- `auto-test.yml` — Run tests after git push
-- `lint-on-edit.yml` — Run linter after file edits
-- `morning-triage.yml` — Daily triage cron workflow
+- Python 3.10+
+- No pip dependencies (pure stdlib)
+- `gh` CLI for GitHub workflows (optional)

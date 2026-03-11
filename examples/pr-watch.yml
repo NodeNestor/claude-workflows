@@ -1,0 +1,12 @@
+name: pr-watch
+description: Poll for new PRs every 10 minutes, review and comment
+trigger:
+  cron: "*/10 * * * *"
+steps:
+  - name: fetch-prs
+    run: "gh pr list --state open --json number,title,author,updatedAt,additions,deletions,labels --limit 10"
+    timeout: 30
+    on_failure: continue
+
+  - name: review
+    agent: "Review the open PRs above. For any new or updated PRs that haven't been reviewed yet, spawn an agent to review the code and leave a comment with feedback."

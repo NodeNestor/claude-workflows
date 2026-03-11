@@ -1,0 +1,19 @@
+name: deploy-watch
+description: Monitor deployments, run smoke tests after deploy
+trigger:
+  cron: "*/10 * * * *"
+steps:
+  - name: check-deploys
+    run: "gh run list --workflow deploy --limit 3 --json status,conclusion,createdAt,headBranch"
+    timeout: 30
+    on_failure: continue
+
+  - name: smoke-test
+    when: "contains(steps.check-deploys.output, 'success')"
+    run: "curl -sf https://your-app.com/health || echo 'Health check failed'"
+    timeout: 30
+    on_failure: continue
+
+  - name: alert
+    when: "steps.smoke-test.exit_code != 0"
+    agent: "The deployment health check failed. Investigate the deployment logs and the health endpoint. Check if the latest deploy broke something."
