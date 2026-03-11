@@ -57,12 +57,14 @@ trigger:
   condition: "git push"   # Optional: regex on tool_input content
 ```
 
-**Cron trigger** (planned):
+**Cron trigger** — uses Claude Code's built-in `CronCreate` to schedule recurring runs:
 
 ```yaml
 trigger:
-  cron: "0 8 * * 1-5"    # Standard cron expression
+  cron: "0 8 * * 1-5"    # Standard cron expression (weekdays at 8am)
 ```
+
+On session start, the plugin detects cron workflows and prompts Claude to schedule them with `CronCreate`. They run automatically at the specified times while the session is active.
 
 ### Steps
 

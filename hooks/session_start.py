@@ -1,4 +1,4 @@
-"""SessionStart hook — scan for workflows and report active ones."""
+"""SessionStart hook — scan for workflows, report active ones, prompt cron scheduling."""
 
 import sys
 import os
@@ -21,25 +21,39 @@ def main():
     workflows = load_workflows(cwd)
 
     if not workflows:
-        result = {
-            "result": "continue",
-            "message": "",
-        }
-        json.dump(result, sys.stdout)
+        json.dump({"result": "continue", "message": ""}, sys.stdout)
         return
 
     lines = [f"[Workflows] {len(workflows)} active workflow(s):"]
+    cron_workflows = []
+
     for wf in workflows:
         trigger = wf.get("trigger", {})
-        t_event = trigger.get("event", trigger.get("cron", "manual"))
+        cron_expr = trigger.get("cron", "")
+        t_event = trigger.get("event", "")
         t_matcher = trigger.get("matcher", "")
         desc = wf.get("description", "")
-        line = f"  - {wf['name']}: trigger={t_event}"
-        if t_matcher:
-            line += f" matcher={t_matcher}"
+
+        if cron_expr:
+            line = f"  - {wf['name']}: cron={cron_expr}"
+            cron_workflows.append({"name": wf["name"], "cron": cron_expr, "description": desc})
+        else:
+            line = f"  - {wf['name']}: trigger={t_event}"
+            if t_matcher:
+                line += f" matcher={t_matcher}"
         if desc:
             line += f" ({desc})"
         lines.append(line)
+
+    # Prompt Claude to schedule cron workflows
+    if cron_workflows:
+        lines.append("")
+        lines.append("ACTION REQUIRED: Schedule these cron workflows using CronCreate:")
+        for cw in cron_workflows:
+            lines.append(
+                f'  CronCreate(cron: "{cw["cron"]}", '
+                f'prompt: "Run the workflow \'{cw["name"]}\' using the run_workflow MCP tool.")'
+            )
 
     result = {
         "result": "continue",
