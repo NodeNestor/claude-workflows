@@ -1,6 +1,6 @@
 {
   "name": "claude-workflows",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Agent controller — YAML workflows triggered by events, cron, or GitHub polling. Spawns agents to handle PRs, CI failures, issues, and more.",
   "author": { "name": "NodeNestor" },
   "homepage": "https://github.com/NodeNestor/claude-workflows"
